@@ -1,0 +1,21 @@
+services:
+  auth:
+    build: .
+    container_name: tpp_auth
+    ports:
+      - "8001:8000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-prod}
+      JWT_ACCESS_EXPIRE_MINUTES: ${JWT_ACCESS_EXPIRE_MINUTES:-60}
+      JWT_RESET_EXPIRE_MINUTES: ${JWT_RESET_EXPIRE_MINUTES:-15}
+      DEBUG: ${DEBUG:-true}
+    env_file:
+      - .env
+    networks:
+      - tpp-net
+    restart: unless-stopped
+
+networks:
+  tpp-net:
+    external: true
+    name: tpp-net
