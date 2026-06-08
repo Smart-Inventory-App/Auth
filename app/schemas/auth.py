@@ -37,3 +37,7 @@ class ResetPasswordRequest(BaseModel):
 class MeResponse(BaseModel):
     id: str
     email: str
+
+
+class GoogleAuthRequest(BaseModel):
+    access_token: str

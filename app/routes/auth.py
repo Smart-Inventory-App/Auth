@@ -1,7 +1,9 @@
 import random
+import secrets
 import string
 from datetime import datetime, timedelta
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -20,6 +22,7 @@ from app.models.user import PasswordResetCode, User
 from app.schemas.auth import (
     CheckEmailRequest,
     ForgotPasswordRequest,
+    GoogleAuthRequest,
     LoginRequest,
     LoginResponse,
     MeResponse,
@@ -122,6 +125,38 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
 
     user.hashed_password = hash_password(body.new_password)
     db.commit()
+
+
+@router.post("/google", response_model=LoginResponse)
+def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
+    try:
+        r = httpx.get(
+            "https://www.googleapis.com/oauth2/v1/userinfo",
+            params={"access_token": body.access_token},
+            timeout=10,
+        )
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="No se pudo contactar a Google")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Token de Google inválido")
+
+    info = r.json()
+    email = info.get("email")
+    if not email or not info.get("verified_email"):
+        raise HTTPException(status_code=401, detail="Email de Google no verificado")
+
+    user = _get_user_by_email(email, db)
+    if not user:
+        user = User(email=email, hashed_password=hash_password(secrets.token_hex(32)))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Cuenta desactivada")
+
+    return LoginResponse(access_token=create_access_token(str(user.id), user.email))
 
 
 @router.get("/me", response_model=MeResponse)
