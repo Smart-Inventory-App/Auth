@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     JWT_RESET_EXPIRE_MINUTES: int = 15
     DEBUG: bool = True
 
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+
     class Config:
         env_file = ".env"
 

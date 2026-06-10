@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.email import send_reset_code_email
 from app.core.security import (
     create_access_token,
     create_reset_token,
@@ -78,6 +79,11 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     reset = PasswordResetCode(user_id=user.id, code=code, expires_at=expires_at)
     db.add(reset)
     db.commit()
+
+    try:
+        send_reset_code_email(user.email, code)
+    except Exception:
+        pass
 
     response: dict = {"detail": "Si el email existe, recibirás un código"}
     if settings.DEBUG:
