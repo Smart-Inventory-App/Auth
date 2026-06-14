@@ -43,9 +43,15 @@ def _get_user_by_email(email: str, db: Session):
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
     if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres")
+        raise HTTPException(status_code=400, detail="auth.password_too_short")
+    if not any(c.isupper() for c in body.password):
+        raise HTTPException(status_code=400, detail="auth.password_missing_uppercase")
+    if not any(c.islower() for c in body.password):
+        raise HTTPException(status_code=400, detail="auth.password_missing_lowercase")
+    if not any(c.isdigit() for c in body.password):
+        raise HTTPException(status_code=400, detail="auth.password_missing_digit")
     if _get_user_by_email(body.email, db):
-        raise HTTPException(status_code=400, detail="El email ya está registrado")
+        raise HTTPException(status_code=400, detail="auth.email_already_registered")
     user = User(email=body.email, hashed_password=hash_password(body.password))
     db.add(user)
     db.commit()
@@ -55,9 +61,9 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     user = _get_user_by_email(body.email, db)
     if not user or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+        raise HTTPException(status_code=401, detail="auth.invalid_credentials")
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="Cuenta desactivada")
+        raise HTTPException(status_code=403, detail="auth.account_disabled")
     return LoginResponse(access_token=create_access_token(str(user.id), user.email))
 
 
@@ -70,8 +76,7 @@ def check_email(body: CheckEmailRequest, db: Session = Depends(get_db)):
 def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = _get_user_by_email(body.email, db)
     if not user:
-        # No revelar si el email existe
-        return {"detail": "Si el email existe, recibirás un código"}
+        return {"detail": "auth.reset_code_sent"}
 
     code = "".join(random.choices(string.digits, k=6))
     expires_at = datetime.utcnow() + timedelta(minutes=settings.JWT_RESET_EXPIRE_MINUTES)
@@ -85,7 +90,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     except Exception:
         pass
 
-    response: dict = {"detail": "Si el email existe, recibirás un código"}
+    response: dict = {"detail": "auth.reset_code_sent"}
     if settings.DEBUG:
         response["debug_code"] = code
     return response
@@ -95,7 +100,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
 def verify_code(body: VerifyCodeRequest, db: Session = Depends(get_db)):
     user = _get_user_by_email(body.email, db)
     if not user:
-        raise HTTPException(status_code=400, detail="Código inválido")
+        raise HTTPException(status_code=400, detail="auth.invalid_code")
 
     reset = (
         db.query(PasswordResetCode)
@@ -109,7 +114,7 @@ def verify_code(body: VerifyCodeRequest, db: Session = Depends(get_db)):
         .first()
     )
     if not reset:
-        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_code")
 
     reset.used = True
     db.commit()
@@ -119,15 +124,15 @@ def verify_code(body: VerifyCodeRequest, db: Session = Depends(get_db)):
 @router.post("/reset-password")
 def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
     if len(body.new_password) < 8:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres")
+        raise HTTPException(status_code=400, detail="auth.password_too_short")
     try:
         user_id = decode_reset_token(body.reset_token)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=400, detail="Token inválido")
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
 
     user.hashed_password = hash_password(body.new_password)
     db.commit()
@@ -142,15 +147,15 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
             timeout=10,
         )
     except httpx.RequestError:
-        raise HTTPException(status_code=503, detail="No se pudo contactar a Google")
+        raise HTTPException(status_code=503, detail="auth.google_unreachable")
 
     if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Token de Google inválido")
+        raise HTTPException(status_code=401, detail="auth.google_invalid_token")
 
     info = r.json()
     email = info.get("email")
     if not email or not info.get("verified_email"):
-        raise HTTPException(status_code=401, detail="Email de Google no verificado")
+        raise HTTPException(status_code=401, detail="auth.google_email_not_verified")
 
     user = _get_user_by_email(email, db)
     if not user:
@@ -160,7 +165,7 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.refresh(user)
 
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="Cuenta desactivada")
+        raise HTTPException(status_code=403, detail="auth.account_disabled")
 
     return LoginResponse(access_token=create_access_token(str(user.id), user.email))
 
@@ -174,9 +179,9 @@ def me(
         payload = jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         user_id = payload.get("sub")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Token inválido")
+        raise HTTPException(status_code=401, detail="auth.invalid_token")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        raise HTTPException(status_code=401, detail="auth.user_not_found")
     return MeResponse(id=str(user.id), email=user.email)

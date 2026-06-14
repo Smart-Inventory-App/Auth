@@ -38,7 +38,7 @@ def decode_reset_token(token: str) -> str:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         if payload.get("type") != "reset":
-            raise ValueError("Token inválido")
+            raise ValueError("auth.invalid_or_expired_token")
         return payload["sub"]
     except JWTError:
-        raise ValueError("Token inválido o expirado")
+        raise ValueError("auth.invalid_or_expired_token")
