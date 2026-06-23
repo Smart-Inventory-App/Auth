@@ -40,7 +40,7 @@ def _get_user_by_email(email: str, db: Session):
     return db.query(User).filter(User.email == email).first()
 
 def _check_token(user: User, db: Session, token: string):
-    if user.firebase_token == None or user.firebase_token != token:
+    if user.firebase_token == None:
         user.firebase_token = token
         db.add(user)
         db.commit()
