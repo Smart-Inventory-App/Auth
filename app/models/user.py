@@ -14,6 +14,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+    firebase_token = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

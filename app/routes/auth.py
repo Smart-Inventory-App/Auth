@@ -39,6 +39,12 @@ _bearer = HTTPBearer()
 def _get_user_by_email(email: str, db: Session):
     return db.query(User).filter(User.email == email).first()
 
+def _check_token(user: User, db: Session, token: string):
+    if user.firebase_token == None:
+        user.firebase_token = token
+        db.add(user)
+        db.commit()
+    
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
@@ -64,6 +70,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="auth.invalid_credentials")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="auth.account_disabled")
+    _check_token(user, db, body.firebase_token)
     return LoginResponse(access_token=create_access_token(str(user.id), user.email))
 
 

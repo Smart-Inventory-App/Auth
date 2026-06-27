@@ -9,6 +9,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    firebase_token: str
 
 
 class LoginResponse(BaseModel):
