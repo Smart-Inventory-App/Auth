@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr
 
 
@@ -9,7 +11,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    firebase_token: str
+    firebase_token: Optional[str] = None
 
 
 class LoginResponse(BaseModel):

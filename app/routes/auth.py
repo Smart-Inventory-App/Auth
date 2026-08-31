@@ -39,8 +39,8 @@ _bearer = HTTPBearer()
 def _get_user_by_email(email: str, db: Session):
     return db.query(User).filter(User.email == email).first()
 
-def _check_token(user: User, db: Session, token: string):
-    if user.firebase_token == None:
+def _check_token(user: User, db: Session, token: str | None):
+    if token and user.firebase_token != token:
         user.firebase_token = token
         db.add(user)
         db.commit()
