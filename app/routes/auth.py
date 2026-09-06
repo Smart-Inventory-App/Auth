@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -175,6 +176,29 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="auth.account_disabled")
 
     return LoginResponse(access_token=create_access_token(str(user.id), user.email))
+
+
+class FirebaseTokenRequest(BaseModel):
+    firebase_token: str
+
+
+@router.patch("/firebase-token", status_code=status.HTTP_204_NO_CONTENT)
+def update_firebase_token(
+    body: FirebaseTokenRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        user_id = payload.get("sub")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="auth.invalid_token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="auth.user_not_found")
+
+    _check_token(user, db, body.firebase_token)
 
 
 @router.get("/me", response_model=MeResponse)
