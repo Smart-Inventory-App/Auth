@@ -1,6 +1,7 @@
 import random
 import secrets
 import string
+import uuid
 from datetime import datetime, timedelta
 
 import httpx
@@ -39,6 +40,20 @@ _bearer = HTTPBearer()
 
 def _get_user_by_email(email: str, db: Session):
     return db.query(User).filter(User.email == email).first()
+
+
+def _get_user_by_token(credentials: HTTPAuthorizationCredentials, db: Session) -> User:
+    try:
+        payload = jwt.decode(credentials.credentials, settings.JWT_SECRET,
+                             algorithms=[settings.JWT_ALGORITHM])
+        user_id = uuid.UUID(str(payload.get("sub")))
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="auth.invalid_token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="auth.user_not_found")
+    return user
 
 def _check_token(user: User, db: Session, token: str | None):
     if token and user.firebase_token != token:
@@ -134,7 +149,7 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="auth.password_too_short")
     try:
-        user_id = decode_reset_token(body.reset_token)
+        user_id = uuid.UUID(str(decode_reset_token(body.reset_token)))
     except ValueError:
         raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
 
@@ -188,16 +203,7 @@ def update_firebase_token(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
-    try:
-        payload = jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        user_id = payload.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="auth.invalid_token")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="auth.user_not_found")
-
+    user = _get_user_by_token(credentials, db)
     _check_token(user, db, body.firebase_token)
 
 
@@ -206,13 +212,5 @@ def me(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
-    try:
-        payload = jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        user_id = payload.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="auth.invalid_token")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="auth.user_not_found")
+    user = _get_user_by_token(credentials, db)
     return MeResponse(id=str(user.id), email=user.email)
