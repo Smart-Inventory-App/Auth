@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/tpp_db"
-    JWT_SECRET: str = "change-this-secret-in-production"
+    JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_EXPIRE_MINUTES: int = 30
     JWT_RESET_EXPIRE_MINUTES: int = 15
