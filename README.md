@@ -1,4 +1,6 @@
-# Auth — Smart Inventory
+# Auth — Smart Inventory Platform
+
+[![codecov](https://codecov.io/gh/Smart-Inventory-App/Auth/branch/main/graph/badge.svg?token=rBIEPB69rA)](https://codecov.io/gh/Smart-Inventory-App/Auth)
 
 Microservicio de autenticación para Smart Inventory. Gestiona registro, login (email/contraseña y Google OAuth), recuperación de contraseña y emisión de JWT.
 
@@ -26,7 +28,7 @@ Microservicio de autenticación para Smart Inventory. Gestiona registro, login (
 | POST | `/auth/google` | Login con Google OAuth | — |
 | GET  | `/auth/me` | Info del usuario autenticado | Bearer |
 
-### Recuperación de contraseña
+### Recuperación de Contraseña
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
@@ -36,7 +38,7 @@ Microservicio de autenticación para Smart Inventory. Gestiona registro, login (
 
 ---
 
-## Validaciones de contraseña
+## Validaciones de Contraseña
 
 `/auth/register` y `/auth/reset-password` exigen:
 - Mínimo 8 caracteres
@@ -46,7 +48,7 @@ Microservicio de autenticación para Smart Inventory. Gestiona registro, login (
 
 ---
 
-## Códigos de error
+## Códigos de Error
 
 Todos los errores devuelven un código i18n en el campo `detail` para que el frontend traduzca:
 
@@ -106,7 +108,7 @@ SMTP_FROM=noreply@smartinventory.com
 
 ---
 
-## Setup local
+## Setup Local
 
 ```bash
 python -m venv venv
@@ -171,7 +173,7 @@ Auth/
 
 ---
 
-## Flujo de recuperación de contraseña
+## Flujo de Recuperación de Contraseña
 
 ```
 POST /auth/forgot-password  →  genera código de 6 dígitos → envía por email
