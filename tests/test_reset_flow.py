@@ -83,3 +83,51 @@ def test_reset_con_sub_que_no_es_uuid(client):
     r = client.post("/auth/reset-password",
                     json={"reset_token": token, "new_password": NUEVA_PASSWORD})
     assert r.status_code == 400
+
+
+def _reset_token_de(client, db):
+    register_user(client)
+    codigo = pedir_codigo(client, db)
+    r = client.post("/auth/verify-code", json={"email": TEST_EMAIL, "code": codigo})
+    return r.json()["reset_token"]
+
+
+def test_reset_rechaza_la_misma_contrasena_actual(client, db):
+    reset_token = _reset_token_de(client, db)
+    r = client.post("/auth/reset-password",
+                    json={"reset_token": reset_token, "new_password": VALID_PASSWORD})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "auth.password_same_as_current"
+
+    # la contraseña no se tocó: la actual sigue entrando
+    login = client.post("/auth/login", json={"email": TEST_EMAIL, "password": VALID_PASSWORD,
+                                             "firebase_token": None})
+    assert login.status_code == 200
+
+
+def test_check_new_password_distingue_igual_de_distinta(client, db):
+    reset_token = _reset_token_de(client, db)
+
+    igual = client.post("/auth/check-new-password",
+                        json={"reset_token": reset_token, "new_password": VALID_PASSWORD})
+    assert igual.status_code == 200
+    assert igual.json() == {"different": False}
+
+    distinta = client.post("/auth/check-new-password",
+                           json={"reset_token": reset_token, "new_password": NUEVA_PASSWORD})
+    assert distinta.json() == {"different": True}
+
+
+def test_check_new_password_con_token_invalido(client):
+    r = client.post("/auth/check-new-password",
+                    json={"reset_token": "invalid.token.here", "new_password": NUEVA_PASSWORD})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "auth.invalid_or_expired_token"
+
+
+def test_check_new_password_con_usuario_borrado(client):
+    token = create_reset_token(str(uuid.uuid4()))
+    r = client.post("/auth/check-new-password",
+                    json={"reset_token": token, "new_password": NUEVA_PASSWORD})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "auth.invalid_or_expired_token"
