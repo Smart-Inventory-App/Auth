@@ -157,8 +157,25 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
 
+    if verify_password(body.new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="auth.password_same_as_current")
+
     user.hashed_password = hash_password(body.new_password)
     db.commit()
+
+
+@router.post("/check-new-password")
+def check_new_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    try:
+        user_id = uuid.UUID(str(decode_reset_token(body.reset_token)))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_token")
+
+    return {"different": not verify_password(body.new_password, user.hashed_password)}
 
 
 @router.post("/google", response_model=LoginResponse)
