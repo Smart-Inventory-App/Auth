@@ -152,7 +152,10 @@ def create_admin(
     if _get_admin_by_email(data.email, db):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="auth.admin_already_exists")
 
-    admin = AdminUser(email=data.email, full_name=data.full_name, password_set=False)
+    # Si ya existe cuenta en auth_users (p. ej. un usuario de la app al que se
+    # promueve a admin), ya tiene contraseña — no le pedimos que la redefina.
+    already_has_password = _get_user_by_email(data.email, db) is not None
+    admin = AdminUser(email=data.email, full_name=data.full_name, password_set=already_has_password)
     db.add(admin)
     db.commit()
     db.refresh(admin)
