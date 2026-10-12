@@ -186,6 +186,21 @@ def test_create_admin_de_un_email_nuevo(client, db):
     assert resp.json()["password_set"] is False
 
 
+def test_create_admin_de_un_usuario_que_ya_existe_hereda_password_set(client, db):
+    create_admin(db, email="jefe@x.com")
+    register_user(client, email="promovido@x.com")
+    token = admin_token("jefe@x.com")
+
+    resp = client.post(
+        "/auth/admin/admins",
+        json={"email": "promovido@x.com"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["password_set"] is True
+
+
 def test_create_admin_ya_existente_es_conflicto(client, db):
     create_admin(db, email="jefe@x.com")
     create_admin(db, email="repe@x.com")
