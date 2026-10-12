@@ -51,3 +51,21 @@ TEST_EMAIL = "test@example.com"
 
 def register_user(client, email=TEST_EMAIL, password=VALID_PASSWORD):
     return client.post("/auth/register", json={"email": email, "password": password})
+
+
+def create_admin(db, email="admin@example.com", full_name=None, is_active=True, password_set=False):
+    from app.models.admin import AdminUser
+
+    admin = AdminUser(email=email, full_name=full_name, is_active=is_active, password_set=password_set)
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    return admin
+
+
+def admin_token(email: str) -> str:
+    from jose import jwt
+
+    from app.core.config import settings
+
+    return jwt.encode({"email": email}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
