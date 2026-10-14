@@ -38,6 +38,31 @@ Microservicio de autenticación para Smart Inventory. Gestiona registro, login (
 
 ---
 
+### Administradores (whitelist del backoffice)
+
+Este servicio es el dueño de la tabla `admin_users`. Las credenciales viven en `auth_users`, igual que para cualquier usuario; la tabla solo dice **qué emails son admin**.
+
+| Método | Endpoint | Descripción | Auth |
+|--------|----------|-------------|------|
+| POST | `/auth/admin/check` | Paso 1 del login: `exists` / `is_admin` / `password_set` (público, no devuelve el nombre) | — |
+| POST | `/auth/admin/set-password` | Un admin pendiente define su primera contraseña. **Exige `invite_token`** | Código de invitación |
+| POST | `/auth/admin/login` | Login de admin (whitelist + contraseña ya definida) | — |
+| GET | `/auth/admin/admins` | Lista de admins | Bearer de admin |
+| POST | `/auth/admin/admins` | Alta de admin. Si el email todavía no tiene cuenta, la respuesta trae `invite_token` | Bearer de admin |
+| GET | `/auth/admin/whitelist?email=` | Estado crudo de la whitelist, para otros servicios | `X-Internal-Token` |
+
+**Código de invitación.** Un admin pendiente (sin contraseña) solo puede definirla con el código que se genera al darlo de alta: es un JWT firmado con `JWT_SECRET`, atado a su email, que vence a las `ADMIN_INVITE_EXPIRE_HOURS` (168 por defecto) y deja de servir apenas se define la contraseña. Si el email ya tenía una cuenta creada después de entrar a la whitelist, la contraseña que define el invitado **reemplaza** a la existente (el registro público no verifica el correo, así que nadie puede adelantarse y heredar el rol). No se guarda en la base y no sirve como token de acceso en ningún servicio. Sin él, saber el email de un admin pendiente no alcanza para quedarse con la cuenta.
+
+**Primer admin.** Se da de alta por línea de comandos; imprime el código para pasárselo a esa persona (volver a correrlo para un admin pendiente imprime uno nuevo):
+
+```bash
+python create_admin.py mail@dominio.com "Nombre Apellido"
+```
+
+**`INTERNAL_SERVICE_TOKEN`** protege `/auth/admin/whitelist` (mismo valor que usan `app_backend`, `backoffice_backend` y `ml`). Si no está configurado, ese endpoint queda cerrado para todos.
+
+---
+
 ## Validaciones de Contraseña
 
 `/auth/register` y `/auth/reset-password` exigen:
@@ -96,6 +121,9 @@ JWT_SECRET=change-this-secret-in-production
 JWT_ALGORITHM=HS256
 JWT_ACCESS_EXPIRE_MINUTES=30
 JWT_RESET_EXPIRE_MINUTES=15
+ADMIN_INVITE_EXPIRE_HOURS=168
+# Compartido con el resto de los servicios; vacío = /auth/admin/whitelist cerrado
+INTERNAL_SERVICE_TOKEN=
 DEBUG=true
 
 # SMTP (vacío = solo loguea el código en consola)

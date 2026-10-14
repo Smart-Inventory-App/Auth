@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_EXPIRE_MINUTES: int = 30
     JWT_RESET_EXPIRE_MINUTES: int = 15
+    # Vigencia del código de invitación con el que un admin pendiente define su contraseña.
+    ADMIN_INVITE_EXPIRE_HOURS: int = 168
+    # Token compartido entre servicios. Vacío = los endpoints internos quedan cerrados.
+    INTERNAL_SERVICE_TOKEN: str = ""
     DEBUG: bool = True
 
     SMTP_HOST: str = ""
