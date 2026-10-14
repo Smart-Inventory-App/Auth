@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import hmac
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import EmailStr
@@ -6,7 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    create_admin_invite_token,
+    decode_admin_invite_token,
+    hash_password,
+    verify_password,
+)
 from app.models.admin import AdminUser
 from app.models.user import User
 from app.schemas.admin import (
@@ -53,15 +61,22 @@ def get_current_admin(
     return admin
 
 
+def verify_internal_token(x_internal_token: str | None = Header(default=None)) -> None:
+    """Para endpoints que solo deben usar otros servicios. Sin
+    INTERNAL_SERVICE_TOKEN configurado quedan cerrados para todos."""
+    expected = settings.INTERNAL_SERVICE_TOKEN
+    if not expected or not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="auth.forbidden")
+
+
 @router.post("/check", response_model=CheckEmailResponse)
 def check_email(body: CheckEmailRequest, db: Session = Depends(get_db)):
     """Paso 1 del login del backoffice: dado un email, indica si existe cuenta,
-    si es admin y si ya tiene contraseña definida."""
+    si es admin y si ya tiene contraseña definida. Es público (se consulta antes
+    de loguear), así que no devuelve nada más que eso: ni el nombre."""
     admin = _get_admin_by_email(body.email, db)
     if admin and admin.is_active:
-        return CheckEmailResponse(
-            exists=True, is_admin=True, password_set=admin.password_set, full_name=admin.full_name
-        )
+        return CheckEmailResponse(exists=True, is_admin=True, password_set=admin.password_set)
 
     user = _get_user_by_email(body.email, db)
     if user and user.is_active:
@@ -73,7 +88,19 @@ def check_email(body: CheckEmailRequest, db: Session = Depends(get_db)):
 @router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
 def set_password(body: SetPasswordRequest, db: Session = Depends(get_db)):
     """Primer inicio de sesión de un admin whitelisteado: define su contraseña,
-    que se registra en `auth_users` como la de cualquier otro usuario."""
+    que se registra en `auth_users` como la de cualquier otro usuario.
+
+    Exige el código de invitación que recibió al darlo de alta. Sin él, cualquiera
+    que supiera el email de un admin pendiente podría quedarse con la cuenta antes
+    que su dueño. El código se valida primero y un código que no corresponde a
+    ese email responde igual que uno inválido, para no revelar quién es admin."""
+    try:
+        invited_email = decode_admin_invite_token(body.invite_token)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="auth.invalid_invite")
+    if invited_email != body.email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="auth.invalid_invite")
+
     admin = _get_admin_by_email(body.email, db)
     if not admin or not admin.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="auth.not_an_admin")
@@ -91,26 +118,26 @@ def set_password(body: SetPasswordRequest, db: Session = Depends(get_db)):
 
     existing_user = _get_user_by_email(body.email, db)
     if existing_user:
-        # El email ya tenía cuenta en auth_users (p. ej. era usuario de la app):
-        # lo damos por válido, el admin inicia sesión con esa contraseña existente.
-        admin.password_set = True
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="auth.email_already_registered",
-        )
-
-    user = User(email=body.email, hashed_password=hash_password(body.password))
-    db.add(user)
+        # La cuenta se creó después de que el email entró a la whitelist. El código
+        # prueba que quien lo tiene es el invitado, así que su contraseña reemplaza a
+        # la que hubiera: el registro público no verifica el correo, y si alguien se
+        # adelantó y registró ese email, no debe heredar el rol de admin.
+        existing_user.hashed_password = hash_password(body.password)
+    else:
+        db.add(User(email=body.email, hashed_password=hash_password(body.password)))
     admin.password_set = True
     db.commit()
 
 
-@router.get("/whitelist", response_model=AdminWhitelistResponse)
+@router.get(
+    "/whitelist",
+    response_model=AdminWhitelistResponse,
+    dependencies=[Depends(verify_internal_token)],
+)
 def whitelist_status(email: EmailStr = Query(...), db: Session = Depends(get_db)):
-    """Estado crudo de la whitelist (sin colapsar inactivo → no-admin). Lo usan
-    otros servicios para replicar reglas de login propias (p. ej. distinguir
-    'admin deshabilitado' de 'no es admin')."""
+    """Estado crudo de la whitelist (sin colapsar inactivo → no-admin). Solo para
+    otros servicios (header `X-Internal-Token`): dice quién es admin, si está
+    activo y su nombre, así que no puede estar abierto."""
     admin = _get_admin_by_email(email, db)
     if not admin:
         return AdminWhitelistResponse(is_admin=False, is_active=False, password_set=False)
@@ -159,4 +186,9 @@ def create_admin(
     db.add(admin)
     db.commit()
     db.refresh(admin)
-    return admin
+
+    response = AdminResponse.model_validate(admin)
+    if not already_has_password:
+        # Quien da de alta se lo hace llegar: es lo único que le permite definir su contraseña.
+        response.invite_token = create_admin_invite_token(admin.email)
+    return response

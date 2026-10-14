@@ -42,3 +42,30 @@ def decode_reset_token(token: str) -> str:
         return payload["sub"]
     except JWTError:
         raise ValueError("auth.invalid_or_expired_token")
+
+
+def create_admin_invite_token(email: str) -> str:
+    """Código de invitación de un admin pendiente.
+
+    Usa `invite_for` y no `sub`/`email`: así no sirve como token de acceso en
+    ningún servicio (todos exigen `sub` o `email`), solo para definir la primera
+    contraseña. Deja de servir apenas el admin la define (`password_set`).
+    """
+    expire = datetime.utcnow() + timedelta(hours=settings.ADMIN_INVITE_EXPIRE_HOURS)
+    return jwt.encode(
+        {"invite_for": email, "type": "admin_invite", "exp": expire},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def decode_admin_invite_token(token: str) -> str:
+    """Devuelve el email al que se invitó, o levanta ValueError si no sirve."""
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        raise ValueError("auth.invalid_invite")
+    email = payload.get("invite_for")
+    if payload.get("type") != "admin_invite" or not email:
+        raise ValueError("auth.invalid_invite")
+    return email
