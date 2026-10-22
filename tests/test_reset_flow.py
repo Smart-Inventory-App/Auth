@@ -22,7 +22,10 @@ def pedir_codigo(client, db, email=TEST_EMAIL) -> str:
 
 def test_check_email_reporta_si_existe(client):
     register_user(client)
-    assert client.post("/auth/check-email", json={"email": TEST_EMAIL}).json() == {"exists": True}
+    assert client.post("/auth/check-email", json={"email": TEST_EMAIL}).json() == {
+        "exists": True,
+        "password_set": True,
+    }
 
 
 def test_check_email_reporta_si_no_existe(client):
@@ -131,3 +134,80 @@ def test_check_new_password_con_usuario_borrado(client):
                     json={"reset_token": token, "new_password": NUEVA_PASSWORD})
     assert r.status_code == 400
     assert r.json()["detail"] == "auth.invalid_or_expired_token"
+
+
+# ── configurar contraseña por primera vez (cuentas creadas por Google) ────────
+
+EMAIL_GOOGLE = "google@example.com"
+
+
+def _crear_cuenta_de_google(db, email=EMAIL_GOOGLE) -> User:
+    import uuid as uuid_mod
+    from app.core.security import hash_password
+
+    user = User(
+        id=uuid_mod.uuid4(),
+        email=email,
+        hashed_password=hash_password(uuid_mod.uuid4().hex),
+        has_password=False,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def test_check_email_reporta_password_set_en_false_para_cuenta_de_google(client, db):
+    _crear_cuenta_de_google(db)
+    data = client.post("/auth/check-email", json={"email": EMAIL_GOOGLE}).json()
+    assert data == {"exists": True, "password_set": False}
+
+
+def test_forgot_password_de_cuenta_de_google_manda_el_mail_de_configurar(client, db, monkeypatch):
+    _crear_cuenta_de_google(db)
+    import app.routes.auth as auth_route
+
+    llamadas = []
+    monkeypatch.setattr(auth_route, "send_set_password_code_email",
+                        lambda email, code: llamadas.append(("set_password", email)))
+    monkeypatch.setattr(auth_route, "send_reset_code_email",
+                        lambda email, code: llamadas.append(("reset", email)))
+
+    client.post("/auth/forgot-password", json={"email": EMAIL_GOOGLE})
+
+    assert llamadas == [("set_password", EMAIL_GOOGLE)]
+
+
+def test_forgot_password_de_cuenta_normal_sigue_mandando_el_mail_de_recuperar(client, monkeypatch):
+    register_user(client)
+    import app.routes.auth as auth_route
+
+    llamadas = []
+    monkeypatch.setattr(auth_route, "send_set_password_code_email",
+                        lambda email, code: llamadas.append(("set_password", email)))
+    monkeypatch.setattr(auth_route, "send_reset_code_email",
+                        lambda email, code: llamadas.append(("reset", email)))
+
+    client.post("/auth/forgot-password", json={"email": TEST_EMAIL})
+
+    assert llamadas == [("reset", TEST_EMAIL)]
+
+
+def test_configurar_contrasena_de_cuenta_de_google_de_punta_a_punta(client, db):
+    _crear_cuenta_de_google(db)
+    codigo = pedir_codigo(client, db, email=EMAIL_GOOGLE)
+
+    r = client.post("/auth/verify-code", json={"email": EMAIL_GOOGLE, "code": codigo})
+    reset_token = r.json()["reset_token"]
+
+    r = client.post("/auth/reset-password",
+                    json={"reset_token": reset_token, "new_password": NUEVA_PASSWORD})
+    assert r.status_code == 200
+
+    user = db.query(User).filter(User.email == EMAIL_GOOGLE).first()
+    assert user.has_password is True
+
+    # ahora puede loguearse con contraseña, sin pasar por Google
+    login = client.post("/auth/login", json={"email": EMAIL_GOOGLE, "password": NUEVA_PASSWORD,
+                                             "firebase_token": None})
+    assert login.status_code == 200

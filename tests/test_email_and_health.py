@@ -93,6 +93,20 @@ def test_cae_al_usuario_si_no_hay_smtp_from(smtp, monkeypatch):
     assert smtp.instancias[0].enviados[0]["From"] == "user@test"
 
 
+# --- send_set_password_code_email ---
+
+def test_set_password_email_usa_asunto_y_texto_distintos(smtp):
+    email_mod.send_set_password_code_email("destino@test.com", "222222")
+
+    msg = smtp.instancias[0].enviados[0]
+    assert "Configurá tu contraseña" in msg["Subject"]
+    assert "Código de recuperación" not in msg["Subject"]
+
+    cuerpos = [p.get_payload(decode=True).decode() for p in msg.get_payload()]
+    assert all("222222" in c for c in cuerpos)
+    assert any("Google" in c for c in cuerpos)
+
+
 def test_forgot_password_tolera_fallo_de_envio(client, monkeypatch):
     from tests.conftest import TEST_EMAIL, register_user
 

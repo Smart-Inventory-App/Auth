@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.email import send_reset_code_email
+from app.core.email import send_reset_code_email, send_set_password_code_email
 from app.core.security import (
     create_access_token,
     create_reset_token,
@@ -92,7 +92,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/check-email")
 def check_email(body: CheckEmailRequest, db: Session = Depends(get_db)):
-    return {"exists": _get_user_by_email(body.email, db) is not None}
+    user = _get_user_by_email(body.email, db)
+    if not user:
+        return {"exists": False}
+    return {"exists": True, "password_set": bool(user.has_password)}
 
 
 @router.post("/forgot-password")
@@ -109,7 +112,10 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     db.commit()
 
     try:
-        send_reset_code_email(user.email, code)
+        if user.has_password:
+            send_reset_code_email(user.email, code)
+        else:
+            send_set_password_code_email(user.email, code)
     except Exception:
         pass
 
@@ -161,6 +167,7 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="auth.password_same_as_current")
 
     user.hashed_password = hash_password(body.new_password)
+    user.has_password = True
     db.commit()
 
 
@@ -199,7 +206,11 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
 
     user = _get_user_by_email(email, db)
     if not user:
-        user = User(email=email, hashed_password=hash_password(secrets.token_hex(32)))
+        user = User(
+            email=email,
+            hashed_password=hash_password(secrets.token_hex(32)),
+            has_password=False,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
