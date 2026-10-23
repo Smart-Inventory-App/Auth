@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.database import Base, engine
 from app.models import admin, user  # noqa: F401 — registra modelos
@@ -9,6 +10,16 @@ from app.routes.auth import router
 # Tabla `admin_users`: puede ya existir (creada antes por el backoffice) en la
 # misma base compartida — create_all es aditivo, no la toca si ya está.
 Base.metadata.create_all(bind=engine)
+
+# create_all no altera tablas existentes: no hay Alembic en este servicio, así
+# que las columnas nuevas sobre `auth_users` (preexistente en producción) se
+# agregan acá a mano, de forma idempotente. En SQLite (tests) la columna ya
+# viene incluida porque la tabla se crea de cero con el modelo completo.
+if engine.dialect.name == "postgresql":
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS has_password BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
 
 app = FastAPI(title="Auth Service", version="1.0.0")
 

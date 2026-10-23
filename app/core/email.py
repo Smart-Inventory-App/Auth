@@ -5,20 +5,20 @@ from email.mime.text import MIMEText
 from app.core.config import settings
 
 
-def send_reset_code_email(to_email: str, code: str) -> None:
+def _send_code_email(to_email: str, code: str, subject: str, intro: str) -> None:
     if not settings.SMTP_HOST or not settings.SMTP_USER:
         return
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Código de recuperación - Smart Inventory"
+    msg["Subject"] = subject
     msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
     msg["To"] = to_email
 
-    text = f"Tu código de recuperación es: {code}\nExpira en {settings.JWT_RESET_EXPIRE_MINUTES} minutos."
+    text = f"{intro}\nTu código es: {code}\nExpira en {settings.JWT_RESET_EXPIRE_MINUTES} minutos."
     html = f"""
 <html>
 <body style="font-family: sans-serif; padding: 24px; color: #1a1a1a;">
-  <p>Recibimos una solicitud para restablecer tu contraseña en <strong>Smart Inventory</strong>.</p>
+  <p>{intro}</p>
   <p>Tu código de verificación es:</p>
   <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; margin: 24px 0; color: #2563eb;">
     {code}
@@ -36,3 +36,25 @@ def send_reset_code_email(to_email: str, code: str) -> None:
         server.starttls()
         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         server.send_message(msg)
+
+
+def send_reset_code_email(to_email: str, code: str) -> None:
+    _send_code_email(
+        to_email,
+        code,
+        subject="Código de recuperación - Smart Inventory",
+        intro="Recibimos una solicitud para restablecer tu contraseña en <strong>Smart Inventory</strong>.",
+    )
+
+
+def send_set_password_code_email(to_email: str, code: str) -> None:
+    """Para cuentas creadas por Google que todavía no tienen contraseña propia."""
+    _send_code_email(
+        to_email,
+        code,
+        subject="Configurá tu contraseña - Smart Inventory",
+        intro=(
+            "Tu cuenta de <strong>Smart Inventory</strong> entró hasta ahora con Google. "
+            "Con este código podés definir una contraseña para también poder iniciar sesión sin Google."
+        ),
+    )

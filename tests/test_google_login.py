@@ -72,6 +72,19 @@ def test_reutiliza_el_usuario_existente(client, google, db):
     assert db.query(User).filter(User.email == TEST_EMAIL).count() == 1
 
 
+def test_cuenta_creada_por_google_no_tiene_contrasena_propia(client, google, db):
+    login_google(client)
+    user = db.query(User).filter(User.email == TEST_EMAIL).first()
+    assert user.has_password is False
+
+
+def test_reutilizar_cuenta_existente_no_le_toca_has_password(client, google, db):
+    register_user(client)
+    login_google(client)
+    user = db.query(User).filter(User.email == TEST_EMAIL).first()
+    assert user.has_password is True
+
+
 def test_usuario_desactivado_es_403(client, google, db):
     register_user(client)
     user = db.query(User).filter(User.email == TEST_EMAIL).first()
