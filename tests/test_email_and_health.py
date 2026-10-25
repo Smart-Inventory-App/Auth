@@ -81,6 +81,22 @@ def test_el_mail_lleva_el_codigo_en_texto_y_html(smtp):
     assert all("654321" in c for c in cuerpos)
 
 
+def test_el_mail_lleva_el_logo_si_hay_url_configurada(smtp, monkeypatch):
+    monkeypatch.setattr(settings, "EMAIL_LOGO_URL", "https://cdn.test/logo.png")
+    email_mod.send_reset_code_email("destino@test.com", "654321")
+
+    html = smtp.instancias[0].enviados[0].get_payload()[1].get_payload(decode=True).decode()
+    assert 'src="https://cdn.test/logo.png"' in html
+
+
+def test_el_mail_no_lleva_logo_si_no_hay_url(smtp, monkeypatch):
+    monkeypatch.setattr(settings, "EMAIL_LOGO_URL", "")
+    email_mod.send_reset_code_email("destino@test.com", "654321")
+
+    html = smtp.instancias[0].enviados[0].get_payload()[1].get_payload(decode=True).decode()
+    assert "<img" not in html
+
+
 def test_usa_smtp_from_si_esta_definido(smtp, monkeypatch):
     monkeypatch.setattr(settings, "SMTP_FROM", "no-reply@test.com")
     email_mod.send_reset_code_email("destino@test.com", "111111")

@@ -1,5 +1,7 @@
 # Auth — Smart Inventory Platform
 
+<p align="center"><img src="assets/brand/logo_horizontal_color.png" alt="Smart Inventory" width="360"></p>
+
 [![codecov](https://codecov.io/gh/Smart-Inventory-App/Auth/branch/main/graph/badge.svg?token=rBIEPB69rA)](https://codecov.io/gh/Smart-Inventory-App/Auth)
 
 Microservicio de autenticación para Smart Inventory. Gestiona registro, login (email/contraseña y Google OAuth), recuperación de contraseña y emisión de JWT.
@@ -132,6 +134,9 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=noreply@smartinventory.com
+
+# Logo de los mails: URL https pública del archivo que sirve la web de app_frontend (public/email-logo.png),
+EMAIL_LOGO_URL=
 ```
 
 ---
