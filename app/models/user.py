@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, String, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
@@ -32,3 +32,6 @@ class PasswordResetCode(Base):
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Intentos fallidos de /auth/verify-code contra este código; al llegar al
+    # máximo el código se invalida (un código de 6 dígitos se adivina a fuerza bruta).
+    failed_attempts = Column(Integer, default=0, nullable=False)

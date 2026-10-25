@@ -1,10 +1,9 @@
-import random
+import logging
 import secrets
 import string
 import uuid
 from datetime import datetime, timedelta
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.email import send_reset_code_email, send_set_password_code_email
+from app.core.google import GoogleTokenError, GoogleUnreachable, verify_google_id_token
 from app.core.security import (
     create_access_token,
     create_reset_token,
@@ -33,6 +33,10 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     VerifyCodeRequest,
 )
+
+MAX_CODE_ATTEMPTS = 5
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer()
@@ -104,7 +108,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     if not user:
         return {"detail": "auth.reset_code_sent"}
 
-    code = "".join(random.choices(string.digits, k=6))
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     expires_at = datetime.utcnow() + timedelta(minutes=settings.JWT_RESET_EXPIRE_MINUTES)
 
     reset = PasswordResetCode(user_id=user.id, code=code, expires_at=expires_at)
@@ -117,7 +121,8 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
         else:
             send_set_password_code_email(user.email, code)
     except Exception:
-        pass
+        # No se le avisa a quien pregunta (no revelar si el mail existe), pero queda en el log
+        logger.exception("No se pudo enviar el mail con el código a %s", user.email)
 
     response: dict = {"detail": "auth.reset_code_sent"}
     if settings.DEBUG:
@@ -131,19 +136,31 @@ def verify_code(body: VerifyCodeRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="auth.invalid_code")
 
-    reset = (
+    # Solo cuenta el código vigente más reciente: es el único que se puede estar intentando adivinar
+    latest = (
         db.query(PasswordResetCode)
         .filter(
             PasswordResetCode.user_id == user.id,
-            PasswordResetCode.code == body.code,
             PasswordResetCode.used == False,
             PasswordResetCode.expires_at > datetime.utcnow(),
         )
         .order_by(PasswordResetCode.created_at.desc())
         .first()
     )
-    if not reset:
+    if not latest:
         raise HTTPException(status_code=400, detail="auth.invalid_or_expired_code")
+
+    if not secrets.compare_digest(latest.code, body.code):
+        latest.failed_attempts = (latest.failed_attempts or 0) + 1
+        too_many = latest.failed_attempts >= MAX_CODE_ATTEMPTS
+        if too_many:
+            latest.used = True
+        db.commit()
+        if too_many:
+            raise HTTPException(status_code=429, detail="auth.too_many_attempts")
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_code")
+
+    reset = latest
 
     reset.used = True
     db.commit()
@@ -187,21 +204,19 @@ def check_new_password(body: ResetPasswordRequest, db: Session = Depends(get_db)
 
 @router.post("/google", response_model=LoginResponse)
 def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
-    try:
-        r = httpx.get(
-            "https://www.googleapis.com/oauth2/v1/userinfo",
-            params={"access_token": body.access_token},
-            timeout=10,
-        )
-    except httpx.RequestError:
-        raise HTTPException(status_code=503, detail="auth.google_unreachable")
+    client_ids = settings.google_client_ids
+    if not client_ids:
+        raise HTTPException(status_code=503, detail="auth.google_not_configured")
 
-    if r.status_code != 200:
+    try:
+        claims = verify_google_id_token(body.id_token, client_ids)
+    except GoogleUnreachable:
+        raise HTTPException(status_code=503, detail="auth.google_unreachable")
+    except GoogleTokenError:
         raise HTTPException(status_code=401, detail="auth.google_invalid_token")
 
-    info = r.json()
-    email = info.get("email")
-    if not email or not info.get("verified_email"):
+    email = claims.get("email")
+    if not email or claims.get("email_verified") not in (True, "true"):
         raise HTTPException(status_code=401, detail="auth.google_email_not_verified")
 
     user = _get_user_by_email(email, db)
@@ -215,6 +230,7 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
+    # Si el email ya tenía cuenta se entra en ella: su contraseña no se toca, puede usar Google o su contraseña.
     if not user.is_active:
         raise HTTPException(status_code=403, detail="auth.account_disabled")
 

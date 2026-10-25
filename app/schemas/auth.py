@@ -43,4 +43,5 @@ class MeResponse(BaseModel):
 
 
 class GoogleAuthRequest(BaseModel):
-    access_token: str
+    # El idToken que Google le dio a la app. Se verifica contra GOOGLE_CLIENT_ID
+    id_token: str

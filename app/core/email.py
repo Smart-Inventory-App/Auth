@@ -1,12 +1,17 @@
+import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 def _send_code_email(to_email: str, code: str, subject: str, intro: str) -> None:
     if not settings.SMTP_HOST or not settings.SMTP_USER:
+        # Sin SMTP no sale ningún mail: se avisa en el log para que no parezca que se envió
+        logger.warning("SMTP no configurado (SMTP_HOST / SMTP_USER): no se envió el mail a %s", to_email)
         return
 
     msg = MIMEMultipart("alternative")
