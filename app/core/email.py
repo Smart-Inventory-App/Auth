@@ -14,13 +14,19 @@ def _send_code_email(to_email: str, code: str, subject: str, intro: str) -> None
     msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
     msg["To"] = to_email
 
+    logo_html = (
+        f'<img src="{settings.EMAIL_LOGO_URL}" alt="Smart Inventory" width="220" style="display:block;margin:0 0 20px;">'
+        if settings.EMAIL_LOGO_URL
+        else ""
+    )
     text = f"{intro}\nTu código es: {code}\nExpira en {settings.JWT_RESET_EXPIRE_MINUTES} minutos."
     html = f"""
 <html>
 <body style="font-family: sans-serif; padding: 24px; color: #1a1a1a;">
+  {logo_html}
   <p>{intro}</p>
   <p>Tu código de verificación es:</p>
-  <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; margin: 24px 0; color: #2563eb;">
+  <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; margin: 24px 0; color: #1B3A8F;">
     {code}
   </div>
   <p>Este código expira en <strong>{settings.JWT_RESET_EXPIRE_MINUTES} minutos</strong>.</p>

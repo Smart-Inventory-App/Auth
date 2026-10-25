@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = ""
+    # URL https pública del logo que se muestra arriba de los mails (vacío = mail sin logo).
+    EMAIL_LOGO_URL: str = ""
 
     class Config:
         env_file = ".env"
