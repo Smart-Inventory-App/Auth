@@ -4,7 +4,7 @@ import string
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.email import send_reset_code_email, send_set_password_code_email
+from app.core.email import send_reset_code_email, send_set_password_code_email, send_welcome_email
 from app.core.google import GoogleTokenError, GoogleUnreachable, verify_google_id_token
 from app.core.security import (
     create_access_token,
@@ -42,6 +42,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer()
 
 
+def _send_welcome(email: str, via_google: bool) -> None:
+    """Mail de bienvenida. Se manda después de responder y nunca hace fallar el alta de la cuenta."""
+    try:
+        send_welcome_email(email, via_google=via_google)
+    except Exception:
+        logger.exception("No se pudo enviar el mail de bienvenida a %s", email)
+
+
 def _get_user_by_email(email: str, db: Session):
     return db.query(User).filter(User.email == email).first()
 
@@ -67,7 +75,7 @@ def _check_token(user: User, db: Session, token: str | None):
     
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="auth.password_too_short")
     if not any(c.isupper() for c in body.password):
@@ -81,6 +89,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     user = User(email=body.email, hashed_password=hash_password(body.password))
     db.add(user)
     db.commit()
+    background_tasks.add_task(_send_welcome, body.email, False)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -203,7 +212,7 @@ def check_new_password(body: ResetPasswordRequest, db: Session = Depends(get_db)
 
 
 @router.post("/google", response_model=LoginResponse)
-def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
+def google_login(body: GoogleAuthRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     client_ids = settings.google_client_ids
     if not client_ids:
         raise HTTPException(status_code=503, detail="auth.google_not_configured")
@@ -229,6 +238,8 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
         db.refresh(user)
+        # Solo al crearse la cuenta: entrar de nuevo con Google no vuelve a mandar la bienvenida
+        background_tasks.add_task(_send_welcome, email, True)
 
     # Si el email ya tenía cuenta se entra en ella: su contraseña no se toca, puede usar Google o su contraseña.
     if not user.is_active:

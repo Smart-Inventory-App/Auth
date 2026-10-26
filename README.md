@@ -24,7 +24,7 @@ Microservicio de autenticación para Smart Inventory. Gestiona registro, login (
 
 | Método | Endpoint | Descripción | Auth |
 |--------|----------|-------------|------|
-| POST | `/auth/register` | Crear cuenta (email + contraseña) | — |
+| POST | `/auth/register` | Crear cuenta (email + contraseña). Manda el mail de bienvenida | — |
 | POST | `/auth/login` | Login → devuelve `access_token` | — |
 | POST | `/auth/check-email` | Verificar si un email ya existe | — |
 | POST | `/auth/google` | Login con Google: recibe el `id_token` de Google, lo verifica y devuelve `access_token` | — |
@@ -49,6 +49,8 @@ La app manda el **`id_token`** que Google le dio al usuario (`POST /auth/google`
 - **Email verificado** por Google.
 
 Si el email no tiene cuenta, se crea una con una contraseña aleatoria que nadie conoce y `has_password = false`: la persona puede definir una propia con «Olvidé mi contraseña», que en ese caso manda el mail de «Configurá tu contraseña». Si ya tenía cuenta, se entra en ella.
+
+**Mail de bienvenida.** Al crear la cuenta, ya sea con `/auth/register` o la primera vez que alguien entra con Google, se manda un mail de bienvenida con los primeros pasos (cargar productos, inventario, alertas, notificaciones). Se envía después de responder, así que no demora el alta, y si falla no la impide (queda en el log). Entrar de nuevo con Google, o con Google a una cuenta ya registrada, no lo repite. Los mails (bienvenida, código de recuperación y «Configurá tu contraseña») llevan el logo si `EMAIL_LOGO_URL` está definida.
 
 **Cuentas registradas con contraseña.** Si el email ya tenía una cuenta creada con `/auth/register`, entrar con Google **conserva su contraseña**: la persona puede ingresar con Google o con su contraseña de siempre.
 `GOOGLE_CLIENT_ID` es el ID del cliente de tipo **Aplicación web** de Google Cloud (el mismo que usa la app como `webClientId`). Se pueden poner varios separados por comas. **Vacío = el login con Google queda deshabilitado** (`503 auth.google_not_configured`).
@@ -201,7 +203,7 @@ Auth/
 │   ├── core/
 │   │   ├── config.py       # Settings (pydantic-settings)
 │   │   ├── database.py     # Engine + sesión SQLAlchemy
-│   │   ├── email.py        # Envío SMTP de código de recuperación
+│   │   ├── email.py        # Envío SMTP: bienvenida y códigos de recuperación
 │   │   └── security.py     # Hash bcrypt, creación/validación JWT
 │   ├── models/
 │   │   └── user.py         # User + PasswordResetCode
