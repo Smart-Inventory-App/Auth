@@ -67,8 +67,11 @@ Este servicio es el dueño de la tabla `admin_users`. Las credenciales viven en 
 | POST | `/auth/admin/set-password` | Un admin pendiente define su primera contraseña. **Exige `invite_token`** | Código de invitación |
 | POST | `/auth/admin/login` | Login de admin (whitelist + contraseña ya definida) | — |
 | GET | `/auth/admin/admins` | Lista de admins | Bearer de admin |
-| POST | `/auth/admin/admins` | Alta de admin. Si el email todavía no tiene cuenta, la respuesta trae `invite_token` | Bearer de admin |
+| POST | `/auth/admin/admins` | Alta de admin. Con `initial_password` y un email sin cuenta, **crea la cuenta con esa contraseña inicial** (queda con `must_change_password`); sin ella, la respuesta trae `invite_token` (camino anterior). Si el email ya tiene cuenta, la conserva y se ignora `initial_password` | Bearer de admin |
+| POST | `/auth/change-password` | Cambia la contraseña de quien tiene la sesión iniciada (pide la actual, aplica las reglas de siempre y no admite la misma) y quita la marca `must_change_password` | Bearer |
 | GET | `/auth/admin/whitelist?email=` | Estado crudo de la whitelist, para otros servicios | `X-Internal-Token` |
+
+**Contraseña inicial.** Un administrador puede dar de alta a otro con una contraseña inicial que él mismo define y le hace llegar. La cuenta se crea con la columna `auth_users.must_change_password = true` (se agrega sola al arrancar, como `has_password`): `POST /auth/login` y `GET /auth/me` devuelven `must_change_password` y el dashboard no deja usar nada hasta que la persona la cambie con `POST /auth/change-password`. La contraseña que definió quien dio de alta nunca queda como la definitiva. La app del celular no usa esta marca.
 
 **Código de invitación.** Un admin pendiente (sin contraseña) solo puede definirla con el código que se genera al darlo de alta: es un JWT firmado con `JWT_SECRET`, atado a su email, que vence a las `ADMIN_INVITE_EXPIRE_HOURS` (168 por defecto) y deja de servir apenas se define la contraseña. Si el email ya tenía una cuenta creada después de entrar a la whitelist, la contraseña que define el invitado **reemplaza** a la existente (el registro público no verifica el correo, así que nadie puede adelantarse y heredar el rol). No se guarda en la base y no sirve como token de acceso en ningún servicio. Sin él, saber el email de un admin pendiente no alcanza para quedarse con la cuenta.
 

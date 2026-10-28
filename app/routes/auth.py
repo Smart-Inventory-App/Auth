@@ -19,10 +19,12 @@ from app.core.security import (
     create_reset_token,
     decode_reset_token,
     hash_password,
+    password_rule_error,
     verify_password,
 )
 from app.models.user import PasswordResetCode, User
 from app.schemas.auth import (
+    ChangePasswordRequest,
     CheckEmailRequest,
     ForgotPasswordRequest,
     GoogleAuthRequest,
@@ -100,7 +102,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="auth.account_disabled")
     _check_token(user, db, body.firebase_token)
-    return LoginResponse(access_token=create_access_token(str(user.id), user.email))
+    return LoginResponse(
+        access_token=create_access_token(str(user.id), user.email),
+        must_change_password=bool(user.must_change_password),
+    )
 
 
 @router.post("/check-email")
@@ -268,4 +273,26 @@ def me(
     db: Session = Depends(get_db),
 ):
     user = _get_user_by_token(credentials, db)
-    return MeResponse(id=str(user.id), email=user.email)
+    return MeResponse(id=str(user.id), email=user.email, must_change_password=bool(user.must_change_password))
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    body: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    """Cambia la contraseña de quien tiene la sesión iniciada. Pide la actual (así una sesión abierta en un equipo ajeno
+    no alcanza) y es lo que cierra el «tenés que cambiarla» de las cuentas creadas con una contraseña inicial."""
+    user = _get_user_by_token(credentials, db)
+    if not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="auth.invalid_credentials")
+    error = password_rule_error(body.new_password)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    if verify_password(body.new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="auth.password_same_as_current")
+    user.hashed_password = hash_password(body.new_password)
+    user.has_password = True
+    user.must_change_password = False
+    db.commit()

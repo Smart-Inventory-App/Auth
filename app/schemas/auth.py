@@ -17,6 +17,8 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # La cuenta tiene una contraseña inicial que le dio un administrador: tiene que cambiarla antes de seguir
+    must_change_password: bool = False
 
 
 class CheckEmailRequest(BaseModel):
@@ -40,6 +42,12 @@ class ResetPasswordRequest(BaseModel):
 class MeResponse(BaseModel):
     id: str
     email: str
+    must_change_password: bool = False
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class GoogleAuthRequest(BaseModel):

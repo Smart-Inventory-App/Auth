@@ -18,6 +18,7 @@ Base.metadata.create_all(bind=engine)
 # columnas ya vienen incluidas porque las tablas se crean de cero con el modelo.
 COLUMN_MIGRATIONS = [
     "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS has_password BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE auth_password_reset_codes ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0",
 ]
 
