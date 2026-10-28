@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.email import send_reset_code_email, send_set_password_code_email, send_welcome_email
 from app.core.google import GoogleTokenError, GoogleUnreachable, verify_google_id_token
+from app.core.profile_seed import seed_profile_names
 from app.core.security import (
     create_access_token,
     create_reset_token,
@@ -243,7 +244,8 @@ def google_login(body: GoogleAuthRequest, background_tasks: BackgroundTasks, db:
         db.add(user)
         db.commit()
         db.refresh(user)
-        # Solo al crearse la cuenta: entrar de nuevo con Google no vuelve a mandar la bienvenida
+        # Solo al crearse la cuenta: entrar de nuevo con Google no vuelve a mandar la bienvenida ni toca el perfil
+        seed_profile_names(db, str(user.id), claims)
         background_tasks.add_task(_send_welcome, email, True)
 
     # Si el email ya tenía cuenta se entra en ella: su contraseña no se toca, puede usar Google o su contraseña.

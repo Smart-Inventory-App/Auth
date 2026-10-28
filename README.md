@@ -52,6 +52,8 @@ Si el email no tiene cuenta, se crea una con una contraseña aleatoria que nadie
 
 **Mail de bienvenida.** Al crear la cuenta, ya sea con `/auth/register` o la primera vez que alguien entra con Google, se manda un mail de bienvenida con los primeros pasos (cargar productos, inventario, alertas, notificaciones). Se envía después de responder, así que no demora el alta, y si falla no la impide (queda en el log). Entrar de nuevo con Google, o con Google a una cuenta ya registrada, no lo repite. Los mails (bienvenida, código de recuperación y «Configurá tu contraseña») llevan el logo si `EMAIL_LOGO_URL` está definida.
 
+**Nombre y apellido de Google.** Cuando una cuenta se **crea** con Google (solo ahí), el perfil nuevo (`user_profiles`, la tabla que comparten la app del celular y el dashboard) se deja ya con el nombre y el apellido de esa cuenta de Google (`given_name` y `family_name`; si solo viene `name`, la primera palabra es el nombre y el resto el apellido), cortados a los 20 caracteres que admite el perfil. Volver a entrar con Google no toca nada, y una cuenta que ya existía no recibe el nombre. Es de mejor esfuerzo: si la tabla no existe o falla la escritura, la cuenta se crea igual (`app/core/profile_seed.py`).
+
 **Cuentas registradas con contraseña.** Si el email ya tenía una cuenta creada con `/auth/register`, entrar con Google **conserva su contraseña**: la persona puede ingresar con Google o con su contraseña de siempre.
 `GOOGLE_CLIENT_ID` es el ID del cliente de tipo **Aplicación web** de Google Cloud (el mismo que usa la app como `webClientId`). Se pueden poner varios separados por comas. **Vacío = el login con Google queda deshabilitado** (`503 auth.google_not_configured`).
 
