@@ -22,6 +22,15 @@ def setup_db():
     Base.metadata.drop_all(bind=engine)
 
 
+@pytest.fixture(autouse=True)
+def sin_smtp_real(monkeypatch):
+    """Ningún test manda mails de verdad, aunque el .env de quien corre los tests tenga el SMTP configurado."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "SMTP_HOST", "")
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+
+
 @pytest.fixture
 def db():
     session = TestingSession()

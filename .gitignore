@@ -2,6 +2,10 @@ __pycache__/
 venv/
 .env
 
+# Testing
+.pytest_cache/
+test_auth.db
+
 # Testing Coverage
 .coverage
 .coverage.*

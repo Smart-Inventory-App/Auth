@@ -1,11 +1,10 @@
-import random
+import logging
 import secrets
 import string
 import uuid
 from datetime import datetime, timedelta
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -13,16 +12,20 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.email import send_reset_code_email
+from app.core.email import send_reset_code_email, send_set_password_code_email, send_welcome_email
+from app.core.google import GoogleTokenError, GoogleUnreachable, verify_google_id_token
+from app.core.profile_seed import seed_profile_names
 from app.core.security import (
     create_access_token,
     create_reset_token,
     decode_reset_token,
     hash_password,
+    password_rule_error,
     verify_password,
 )
 from app.models.user import PasswordResetCode, User
 from app.schemas.auth import (
+    ChangePasswordRequest,
     CheckEmailRequest,
     ForgotPasswordRequest,
     GoogleAuthRequest,
@@ -34,8 +37,20 @@ from app.schemas.auth import (
     VerifyCodeRequest,
 )
 
+MAX_CODE_ATTEMPTS = 5
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer()
+
+
+def _send_welcome(email: str, via_google: bool) -> None:
+    """Mail de bienvenida. Se manda después de responder y nunca hace fallar el alta de la cuenta."""
+    try:
+        send_welcome_email(email, via_google=via_google)
+    except Exception:
+        logger.exception("No se pudo enviar el mail de bienvenida a %s", email)
 
 
 def _get_user_by_email(email: str, db: Session):
@@ -63,7 +78,7 @@ def _check_token(user: User, db: Session, token: str | None):
     
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="auth.password_too_short")
     if not any(c.isupper() for c in body.password):
@@ -77,6 +92,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     user = User(email=body.email, hashed_password=hash_password(body.password))
     db.add(user)
     db.commit()
+    background_tasks.add_task(_send_welcome, body.email, False)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -87,12 +103,18 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="auth.account_disabled")
     _check_token(user, db, body.firebase_token)
-    return LoginResponse(access_token=create_access_token(str(user.id), user.email))
+    return LoginResponse(
+        access_token=create_access_token(str(user.id), user.email),
+        must_change_password=bool(user.must_change_password),
+    )
 
 
 @router.post("/check-email")
 def check_email(body: CheckEmailRequest, db: Session = Depends(get_db)):
-    return {"exists": _get_user_by_email(body.email, db) is not None}
+    user = _get_user_by_email(body.email, db)
+    if not user:
+        return {"exists": False}
+    return {"exists": True, "password_set": bool(user.has_password)}
 
 
 @router.post("/forgot-password")
@@ -101,7 +123,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     if not user:
         return {"detail": "auth.reset_code_sent"}
 
-    code = "".join(random.choices(string.digits, k=6))
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
     expires_at = datetime.utcnow() + timedelta(minutes=settings.JWT_RESET_EXPIRE_MINUTES)
 
     reset = PasswordResetCode(user_id=user.id, code=code, expires_at=expires_at)
@@ -109,9 +131,13 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     db.commit()
 
     try:
-        send_reset_code_email(user.email, code)
+        if user.has_password:
+            send_reset_code_email(user.email, code)
+        else:
+            send_set_password_code_email(user.email, code)
     except Exception:
-        pass
+        # No se le avisa a quien pregunta (no revelar si el mail existe), pero queda en el log
+        logger.exception("No se pudo enviar el mail con el código a %s", user.email)
 
     response: dict = {"detail": "auth.reset_code_sent"}
     if settings.DEBUG:
@@ -125,19 +151,31 @@ def verify_code(body: VerifyCodeRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="auth.invalid_code")
 
-    reset = (
+    # Solo cuenta el código vigente más reciente: es el único que se puede estar intentando adivinar
+    latest = (
         db.query(PasswordResetCode)
         .filter(
             PasswordResetCode.user_id == user.id,
-            PasswordResetCode.code == body.code,
             PasswordResetCode.used == False,
             PasswordResetCode.expires_at > datetime.utcnow(),
         )
         .order_by(PasswordResetCode.created_at.desc())
         .first()
     )
-    if not reset:
+    if not latest:
         raise HTTPException(status_code=400, detail="auth.invalid_or_expired_code")
+
+    if not secrets.compare_digest(latest.code, body.code):
+        latest.failed_attempts = (latest.failed_attempts or 0) + 1
+        too_many = latest.failed_attempts >= MAX_CODE_ATTEMPTS
+        if too_many:
+            latest.used = True
+        db.commit()
+        if too_many:
+            raise HTTPException(status_code=429, detail="auth.too_many_attempts")
+        raise HTTPException(status_code=400, detail="auth.invalid_or_expired_code")
+
+    reset = latest
 
     reset.used = True
     db.commit()
@@ -161,6 +199,7 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="auth.password_same_as_current")
 
     user.hashed_password = hash_password(body.new_password)
+    user.has_password = True
     db.commit()
 
 
@@ -179,31 +218,37 @@ def check_new_password(body: ResetPasswordRequest, db: Session = Depends(get_db)
 
 
 @router.post("/google", response_model=LoginResponse)
-def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
-    try:
-        r = httpx.get(
-            "https://www.googleapis.com/oauth2/v1/userinfo",
-            params={"access_token": body.access_token},
-            timeout=10,
-        )
-    except httpx.RequestError:
-        raise HTTPException(status_code=503, detail="auth.google_unreachable")
+def google_login(body: GoogleAuthRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    client_ids = settings.google_client_ids
+    if not client_ids:
+        raise HTTPException(status_code=503, detail="auth.google_not_configured")
 
-    if r.status_code != 200:
+    try:
+        claims = verify_google_id_token(body.id_token, client_ids)
+    except GoogleUnreachable:
+        raise HTTPException(status_code=503, detail="auth.google_unreachable")
+    except GoogleTokenError:
         raise HTTPException(status_code=401, detail="auth.google_invalid_token")
 
-    info = r.json()
-    email = info.get("email")
-    if not email or not info.get("verified_email"):
+    email = claims.get("email")
+    if not email or claims.get("email_verified") not in (True, "true"):
         raise HTTPException(status_code=401, detail="auth.google_email_not_verified")
 
     user = _get_user_by_email(email, db)
     if not user:
-        user = User(email=email, hashed_password=hash_password(secrets.token_hex(32)))
+        user = User(
+            email=email,
+            hashed_password=hash_password(secrets.token_hex(32)),
+            has_password=False,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
+        # Solo al crearse la cuenta: entrar de nuevo con Google no vuelve a mandar la bienvenida ni toca el perfil
+        seed_profile_names(db, str(user.id), claims)
+        background_tasks.add_task(_send_welcome, email, True)
 
+    # Si el email ya tenía cuenta se entra en ella: su contraseña no se toca, puede usar Google o su contraseña.
     if not user.is_active:
         raise HTTPException(status_code=403, detail="auth.account_disabled")
 
@@ -230,4 +275,26 @@ def me(
     db: Session = Depends(get_db),
 ):
     user = _get_user_by_token(credentials, db)
-    return MeResponse(id=str(user.id), email=user.email)
+    return MeResponse(id=str(user.id), email=user.email, must_change_password=bool(user.must_change_password))
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    body: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
+):
+    """Cambia la contraseña de quien tiene la sesión iniciada. Pide la actual (así una sesión abierta en un equipo ajeno
+    no alcanza) y es lo que cierra el «tenés que cambiarla» de las cuentas creadas con una contraseña inicial."""
+    user = _get_user_by_token(credentials, db)
+    if not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="auth.invalid_credentials")
+    error = password_rule_error(body.new_password)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    if verify_password(body.new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="auth.password_same_as_current")
+    user.hashed_password = hash_password(body.new_password)
+    user.has_password = True
+    user.must_change_password = False
+    db.commit()

@@ -12,6 +12,19 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def password_rule_error(password: str) -> str | None:
+    """Por qué una contraseña no sirve (las mismas reglas del registro), o `None` si cumple."""
+    if len(password) < 8:
+        return "auth.password_too_short"
+    if not any(c.isupper() for c in password):
+        return "auth.password_missing_uppercase"
+    if not any(c.islower() for c in password):
+        return "auth.password_missing_lowercase"
+    if not any(c.isdigit() for c in password):
+        return "auth.password_missing_digit"
+    return None
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
