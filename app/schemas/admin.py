@@ -20,10 +20,12 @@ class AdminResponse(BaseModel):
 
 
 class AdminCreate(BaseModel):
-    """Alta de admin: solo email y nombre. La contraseña la define el propio
-    admin en su primer inicio de sesión."""
+    """Alta de admin: email, nombre y, si el email no tiene cuenta, una contraseña inicial que el administrador que da
+    de alta le hace llegar. Con ella entra por primera vez y el sistema le pide cambiarla. Sin contraseña inicial queda
+    el camino anterior: un código de invitación con el que define la suya."""
     email: EmailStr
     full_name: Optional[str] = None
+    initial_password: Optional[str] = None
 
 
 class CheckEmailRequest(BaseModel):

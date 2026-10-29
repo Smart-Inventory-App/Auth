@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, String, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
@@ -21,6 +21,9 @@ class User(Base):
     # mandar el mail de "configurá tu contraseña" en vez de "recuperala", y
     # reset-password lo pone en True apenas definen una real.
     has_password = Column(Boolean, default=True, nullable=False)
+    # True en las cuentas que un administrador creó con una contraseña inicial: en su primer ingreso tienen que
+    # cambiarla por una propia (POST /auth/change-password lo pone en False).
+    must_change_password = Column(Boolean, default=False, nullable=False)
 
 
 class PasswordResetCode(Base):
@@ -32,3 +35,6 @@ class PasswordResetCode(Base):
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Intentos fallidos de /auth/verify-code contra este código; al llegar al
+    # máximo el código se invalida (un código de 6 dígitos se adivina a fuerza bruta).
+    failed_attempts = Column(Integer, default=0, nullable=False)

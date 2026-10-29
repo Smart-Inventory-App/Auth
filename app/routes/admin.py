@@ -13,6 +13,7 @@ from app.core.security import (
     create_admin_invite_token,
     decode_admin_invite_token,
     hash_password,
+    password_rule_error,
     verify_password,
 )
 from app.models.admin import AdminUser
@@ -182,13 +183,24 @@ def create_admin(
     # Si ya existe cuenta en auth_users (p. ej. un usuario de la app al que se
     # promueve a admin), ya tiene contraseña — no le pedimos que la redefina.
     already_has_password = _get_user_by_email(data.email, db) is not None
-    admin = AdminUser(email=data.email, full_name=data.full_name, password_set=already_has_password)
+
+    # Sin cuenta y con una contraseña inicial: se crea la cuenta con esa contraseña y en su primer ingreso tiene que
+    # cambiarla. La que define el administrador que da de alta nunca queda como la definitiva.
+    initial = data.initial_password if not already_has_password else None
+    if initial is not None:
+        error = password_rule_error(initial)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        db.add(User(email=data.email, hashed_password=hash_password(initial), must_change_password=True))
+    admin = AdminUser(
+        email=data.email, full_name=data.full_name, password_set=already_has_password or initial is not None
+    )
     db.add(admin)
     db.commit()
     db.refresh(admin)
 
     response = AdminResponse.model_validate(admin)
-    if not already_has_password:
+    if not already_has_password and initial is None:
         # Quien da de alta se lo hace llegar: es lo único que le permite definir su contraseña.
         response.invite_token = create_admin_invite_token(admin.email)
     return response

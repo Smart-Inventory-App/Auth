@@ -53,6 +53,15 @@ def test_no_envia_sin_host_configurado(monkeypatch):
     email_mod.send_reset_code_email("a@b.com", "123456")  # no debe romper
 
 
+def test_sin_smtp_configurado_deja_un_aviso_en_el_log_sin_el_codigo(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "SMTP_HOST", "")
+    with caplog.at_level("WARNING", logger="app.core.email"):
+        email_mod.send_set_password_code_email("a@b.com", "654321")
+    assert "SMTP no configurado" in caplog.text
+    assert "a@b.com" in caplog.text
+    assert "654321" not in caplog.text
+
+
 def test_no_envia_sin_usuario_configurado(monkeypatch):
     monkeypatch.setattr(settings, "SMTP_HOST", "smtp.test")
     monkeypatch.setattr(settings, "SMTP_USER", "")
@@ -81,6 +90,22 @@ def test_el_mail_lleva_el_codigo_en_texto_y_html(smtp):
     assert all("654321" in c for c in cuerpos)
 
 
+def test_el_mail_lleva_el_logo_si_hay_url_configurada(smtp, monkeypatch):
+    monkeypatch.setattr(settings, "EMAIL_LOGO_URL", "https://cdn.test/logo.png")
+    email_mod.send_reset_code_email("destino@test.com", "654321")
+
+    html = smtp.instancias[0].enviados[0].get_payload()[1].get_payload(decode=True).decode()
+    assert 'src="https://cdn.test/logo.png"' in html
+
+
+def test_el_mail_no_lleva_logo_si_no_hay_url(smtp, monkeypatch):
+    monkeypatch.setattr(settings, "EMAIL_LOGO_URL", "")
+    email_mod.send_reset_code_email("destino@test.com", "654321")
+
+    html = smtp.instancias[0].enviados[0].get_payload()[1].get_payload(decode=True).decode()
+    assert "<img" not in html
+
+
 def test_usa_smtp_from_si_esta_definido(smtp, monkeypatch):
     monkeypatch.setattr(settings, "SMTP_FROM", "no-reply@test.com")
     email_mod.send_reset_code_email("destino@test.com", "111111")
@@ -107,7 +132,7 @@ def test_set_password_email_usa_asunto_y_texto_distintos(smtp):
     assert any("Google" in c for c in cuerpos)
 
 
-def test_forgot_password_tolera_fallo_de_envio(client, monkeypatch):
+def test_forgot_password_tolera_fallo_de_envio(client, monkeypatch, caplog):
     from tests.conftest import TEST_EMAIL, register_user
 
     register_user(client)
@@ -116,9 +141,11 @@ def test_forgot_password_tolera_fallo_de_envio(client, monkeypatch):
         raise RuntimeError("smtp caído")
 
     monkeypatch.setattr("app.routes.auth.send_reset_code_email", explota)
-    r = client.post("/auth/forgot-password", json={"email": TEST_EMAIL})
+    with caplog.at_level("ERROR", logger="app.routes.auth"):
+        r = client.post("/auth/forgot-password", json={"email": TEST_EMAIL})
     assert r.status_code == 200
     assert r.json()["detail"] == "auth.reset_code_sent"
+    assert "No se pudo enviar el mail" in caplog.text
 
 
 # --- get_db ---
